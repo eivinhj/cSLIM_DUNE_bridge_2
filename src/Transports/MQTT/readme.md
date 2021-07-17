@@ -71,27 +71,11 @@ Build with
 ```
 make rebuild_cache && make
 ```
-Run noptilus simulator:
+Run cSLIM bridge simulator:
 
 ```
-sudo ./dune -c lauv-noptilus-1 -p Simulation
+sudo ./dune -c SLIM-message-bridge -p Simulation
 ```
 
 
 
-Upload planSpec &quot;s&quot; via Neptus or change planId in MQTT_PlanControl_StartPlan and MQTT_PlanControl_StopPlan .ini files located in /etc/
-
-
-Start planSpec with
-
-```
-./dune -c MQTT_PlanControl_StartPlan -p Simulation
-
-```
-
-Stop planSpec with
-
-```
-./dune -c MQTT_PlanControl_StopPlan -p Simulation
-
-```
