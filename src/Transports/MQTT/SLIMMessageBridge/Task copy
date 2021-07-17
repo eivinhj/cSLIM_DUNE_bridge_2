@@ -1,0 +1,525 @@
+//***************************************************************************
+// Copyright 2007-2020 Universidade do Porto - Faculdade de Engenharia      *
+// Laboratório de Sistemas e Tecnologia Subaquática (LSTS)                  *
+//***************************************************************************
+// This file is part of DUNE: Unified Navigation Environment.               *
+//                                                                          *
+// Commercial Licence Usage                                                 *
+// Licencees holding valid commercial DUNE licences may use this file in    *
+// accordance with the commercial licence agreement provided with the       *
+// Software or, alternatively, in accordance with the terms contained in a  *
+// written agreement between you and Faculdade de Engenharia da             *
+// Universidade do Porto. For licensing terms, conditions, and further      *
+// information contact lsts@fe.up.pt.                                       *
+//                                                                          *
+// Modified European Union Public Licence - EUPL v.1.1 Usage                *
+// Alternatively, this file may be used under the terms of the Modified     *
+// EUPL, Version 1.1 only (the "Licence"), appearing in the file LICENCE.md *
+// included in the packaging of this file. You may not use this work        *
+// except in compliance with the Licence. Unless required by applicable     *
+// law or agreed to in writing, software distributed under the Licence is   *
+// distributed on an "AS IS" basis, WITHOUT WARRANTIES OR CONDITIONS OF     *
+// ANY KIND, either express or implied. See the Licence for the specific    *
+// language governing permissions and limitations at                        *
+// https://github.com/LSTS/dune/blob/master/LICENCE.md and                  *
+// http://ec.europa.eu/idabc/eupl.html.                                     *
+//***************************************************************************
+// Author: Eivind Jølsgard                                                 *
+//***************************************************************************
+
+// ISO C++ 98 headers.
+#include <cstddef>
+// DUNE headers.
+#include <DUNE/DUNE.hpp>
+#include <mqtt/async_client.h>
+
+namespace Transports
+{
+  //! Insert short task description here.
+  //!
+  //! Insert explanation on task behaviour here.
+  //! @author Eivind Jølsgard
+  namespace MQTT
+  {
+    namespace SLIMMessageBridge
+    {
+      using DUNE_NAMESPACES;
+
+	    mqtt::connect_options conn_opts;
+      mqtt::async_client* mqtt_client;
+      auto timeout = std::chrono::seconds(10);
+
+       int setTBRlocation(int tbr_sensor, int latitude, int longitude)
+        {
+          int sensor_index = -1; 
+          for(int i = 0; i < number_of_detected_slim_bouys; i++)
+          {
+            if(slim_bouys[i].tbr_sensor_id == tbr_sensor)
+            {
+              sensor_index = i;
+              break;
+            }
+          }
+          if(sensor_index == -1) //New sensor
+
+            sensor_index = number_of_detected_slim_bouys;
+            number_of_detected_slim_bouys++;
+          }
+          slim_bouys[sensor_index].longitude = longitude;
+          slim_bouys[sensor_index].latitude = latitude;
+          
+
+        }
+
+        int getTBRlocation(int tbr_sensor, int* latitude, int* longitude)
+        {
+          int sensor_index = -1; 
+          for(int i = 0; i < number_of_detected_slim_bouys; i++)
+          {
+            if(slim_bouys[i].tbr_sensor_id == tbr_sensor)
+            {
+              sensor_index = i;
+              break;
+            }
+          }
+          if(sensor_index == -1) //New sensor
+            return -1;
+          }
+          *longitude = slim_bouys[sensor_index].longitude;
+          *latitude  = slim_bouys[sensor_index].latitude ;
+        }
+
+        void fillTBRSensorMessage(IMC::TBRSensor* sensor_msg, uint8_t* message)
+        {
+          sensor_msg->unix_timestamp = unix_timestamp;
+          sensor_msg->temperature = fp32_t(temp_C);
+          sensor_msg->avg_noise_level = avg_noise_level;
+          sensor_msg->peak_noise_level = peak_noise_level;
+          sensor_msg->recv_listen_freq = recv_listen_freq;
+          sensor_msg->recv_mem_addr = recv_mem_addr;
+        }
+
+        void fillTBRFishTagMessage(IMC::TBRFishTag tbr, uint8_t* message)
+        {
+          
+        }
+      
+      //TODO could be made more C++ styled
+      typedef struct slim_bouy_status {
+        uint16_t  tbr_sensor_id;
+        uint32_t  latitude;
+        uint32_t  longitude;
+      /*  uint8_t battery_status;
+        uint8_t air_temperature;
+        uint8_t pdop;
+        uint8_t fix; 
+        uint8_t number_of_tracked_satellites;
+      */
+      } slim_bouy_status_t;
+
+      
+      slim_bouy_status_t *slim_bouys;
+      int number_of_detected_slim_bouys = 0;
+
+
+
+       struct Arguments
+      {
+        std::string address; // Server address.
+        std::string mqtt_username;
+        std::string mqtt_password;
+        int port; // Server port.
+        std::string subscribe_topic;  //Topic to subscribe
+        std::string publish_topic;  //Topic to publish
+        std::string client_id;
+        std::string lwt_payload; //Last will testament payload
+        int  QOS; //Quality of service
+        unsigned int source;  //IMC Source
+        unsigned int sourceEntity;  //IMC Source
+        unsigned int destination;  //IMC Source
+        unsigned int destinationEntity;  //IMC Source
+        std::string planId; //IMC Plan ID
+        unsigned int planOp; //IMC Plan Op
+        unsigned int max_number_of_slim_bouys; 
+      };
+
+      struct Task: public DUNE::Tasks::Task
+      {
+        // Task arguments.
+        Arguments m_args;
+        // Parser handle.
+        IMC::Parser m_parser;
+
+        //Buffers
+        DUNE::Utils::ByteBuffer m_buf;
+        DUNE::Utils::ByteBuffer m_buf_receive;
+
+        //! Constructor.
+        //! @param[in] name task name.
+        //! @param[in] ctx context.
+        Task(const std::string& name, Tasks::Context& ctx):
+          DUNE::Tasks::Task(name, ctx)
+        {
+
+          param("MQTT Broker Address", m_args.address)
+          .defaultValue("tcp://localhost")
+          .description("MQTT broker address");
+
+          param("MQTT Username", m_args.mqtt_username)
+          .defaultValue("user")
+          .description("MQTT username");
+
+          param("MQTT Password", m_args.mqtt_password)
+          .defaultValue("password")
+          .description("MQTT password");
+
+          param("Address", m_args.address)
+          .defaultValue("tcp://localhost")
+          .description("MQTT broker address");
+
+          param("Subscribe Topic", m_args.subscribe_topic)
+          .defaultValue("toServer")
+          .description("MQTT Subscribe topic");
+
+          param("Port", m_args.port)
+          .defaultValue("2023")
+          .description("MQTT broker port");
+
+          param("Publish Topic", m_args.publish_topic)
+          .defaultValue("toVeichle")
+          .description("MQTT Publish topic");
+
+          param("ClientID", m_args.client_id)
+          .defaultValue("Default client ID")
+          .description("MQTT Client ID");
+
+          param("LWT Payload", m_args.lwt_payload)
+          .defaultValue("LWT payload")
+          .description("MQTT Last Will Testament");
+
+          param("QOS", m_args.QOS)
+          .defaultValue("1")
+          .description("MQTT Quality of service");
+
+          param("IMC Source", m_args.source)
+          .defaultValue("65535")
+          .description("IMC Source");
+
+          param("IMC Source Entity", m_args.sourceEntity)
+          .defaultValue("255")
+          .description("IMC Source Entity");
+
+          param("IMC Destination", m_args.destination)
+          .defaultValue("26")
+          .description("IMC Destination");
+
+          param("IMC Destination Entity", m_args.destinationEntity)
+          .defaultValue("46")
+          .description("IMC Destination Entity");
+
+          param("IMC PlanID", m_args.planId)
+          .defaultValue("s")
+          .description("IMC PlanID to start");
+
+          param("IMC PlanOP", m_args.planOp)
+          .defaultValue("0")
+          .description("IMC PlanOperation");
+
+          param("Max Number Of Bouys", m_args.max_number_of_slim_bouys)
+          .defaultValue("1000")
+          .description("Number of SLIM Bouys");
+        }
+
+        //! Update internal state with new parameter values.
+        void
+        onUpdateParameters(void)
+        {
+        }
+
+        //! Reserve entity identifiers.
+        void
+        onEntityReservation(void)
+        {
+        }
+
+        //! Resolve entity names.
+        void
+        onEntityResolution(void)
+        {
+        }
+
+        //! Acquire resources.
+        void
+        onResourceAcquisition(void)
+        {
+          inf(DTR("connecting to MQTT broker"));
+          std::string adr_string(m_args.address); 
+
+          adr_string.append(":");
+          adr_string.append(std::to_string(m_args.port));
+
+
+          inf(adr_string.c_str());
+
+          slim_bouys = new slim_bouy_status_t[m_args.max_number_of_slim_bouys];
+
+
+          mqtt_client = new mqtt::async_client(adr_string, m_args.client_id);
+
+          conn_opts.set_keep_alive_interval(200); 
+	        conn_opts.set_clean_session(true); 
+          
+          conn_opts.set_user_name(m_args.mqtt_username.c_str());
+          conn_opts.set_password(m_args.mqtt_password.c_str());
+
+          try
+          {
+            mqtt_client->connect(conn_opts)->wait();
+            inf(DTR("connected to MQTT broker"));
+		        mqtt_client->start_consuming();
+            std::string subscribe_str(m_args.subscribe_topic.c_str());
+            
+            char lastChar = subscribe_str.back();
+            if(lastChar == '/')
+            {
+               subscribe_str.append("#");
+            }
+             
+            
+            mqtt_client->subscribe(subscribe_str, m_args.QOS)->wait();
+            //inf(subscribe_str);
+            
+            setEntityState(IMC::EntityState::ESTA_NORMAL, Status::CODE_ACTIVE);
+          }
+          catch (std::runtime_error& e)
+          {
+            throw RestartNeeded(e.what(), 5);
+          }
+        }
+
+        //! Initialize resources.
+        void
+        onResourceInitialization(void)
+        {
+        }
+
+        //! Release resources.
+        void
+        onResourceRelease(void)
+        {
+          inf(DTR("onResourceRelease"));
+          
+          delete slim_bouys;
+
+          try{
+              if (mqtt_client)
+              {
+                //auto toks = mqtt_client->get_pending_delivery_tokens();
+               // if (!toks.empty())
+               // inf(DTR("Error: There are pending MQTT delivery tokens!" ));
+                
+                mqtt_client->unsubscribe(m_args.subscribe_topic)->wait();
+                mqtt_client->stop_consuming();
+                mqtt_client->disconnect()->wait();
+                delete mqtt_client;
+              }
+          }
+          catch (std::runtime_error& e)
+          {
+            throw RestartNeeded(e.what(), 5);
+          }
+        }
+          //! Main loop.
+        void
+        onMain(void)
+        {
+            //Variable declarations
+            uint8_t* p_receive;
+            unsigned int n_r_receive;
+
+       
+            
+
+            //Print Plan to terminal
+          //  planControl.toText(std::cout);
+  
+            //Serialize message and place in buffer
+          //  unsigned int n = planControl.getSerializationSize();
+          //  m_buf.grow(n);
+          //  uint8_t* p = m_buf.getBuffer();
+          //  IMC::Packet::serialize(&planControl, p, n);
+
+            //Print serialized in hex
+            /*for (int i = 0; i < n; i++)
+              {
+                inf("%x", p[i]);
+              }*/
+
+
+            //send message  
+            try
+            {
+            //  mqtt::message_ptr pubmsg = mqtt::make_message(m_args.publish_topic, p, n);
+            //  pubmsg->set_qos(m_args.QOS);
+            //  mqtt_client->publish(pubmsg)->wait_for(timeout);
+            }
+            catch (std::exception& e)
+            {
+              err(DTR("Transmission fail" ));
+              throw RestartNeeded(e.what(), 5);
+            }
+
+
+          while (!stopping())
+          {
+            
+            waitForMessages(1.0);
+
+            //Extract new message
+            auto msg = mqtt_client->consume_message();
+			      if (msg)
+            {
+            inf(DTR("Receiving message" ));
+              unsigned int n_receive;
+                
+
+              try
+              {
+                //Make sure the topic is the requested topic
+                std::string topic = msg->get_topic();
+                std::string part_of_topic_to_compare = topic.substr(0, m_args.subscribe_topic.size() - 1);
+
+                if(part_of_topic_to_compare.compare(m_args.subscribe_topic))
+                {
+
+                  //Print topic
+                  std::string topic_inf = "Topic is ";
+                  topic_inf.append(msg->get_topic());
+                  inf(topic_inf.c_str());
+
+
+                  n_r_receive = msg->get_payload().size();
+                  
+                p_receive = (uint8_t*) msg->get_payload().data();
+        
+                }
+                else{
+                    inf(DTR("Topic of no interrest" ));
+                }
+              }
+              catch (std::exception& e)
+              {
+                  throw RestartNeeded(e.what(), 5);
+              }
+
+              if (n_r_receive > 6) //Message must at least contain SLIM header
+                
+              {
+                //extract header
+                int tbr_serial_number = (p_receive[0] << 6) | (p_receive[1] >> 2);
+                int reference_timestamp = p_receive[2]  << 24 |
+                                            p_receive[3]  << 16 |
+                                            p_receive[4]  <<  8 |
+                                            p_receive[5]; 
+                int header_flag = p_receive[1] & 0b11;
+
+                if(header_flag == 0) //TBR message
+                {               
+                  //extract messages
+                  int message_start_index = 0;
+
+
+                }
+                else if(header_flag == 1) //SLIM status message
+                {
+                  //extract TBR sensor and position and store such that it can be retrieved when handling TBR messages
+                  int latitude = (p_receive[5] & 0b1)<<24 |
+                                  p_receive[6] << 16 |
+                                  p_receive[7] <<  8 | 
+                                  p_receive[8]; 
+                  int longitude =(p_receive[1] & 0b11)<<24 |
+                                  p_receive[2] << 16 |
+                                  p_receive[3] <<  8 | 
+                                  p_receive[4]; 
+                  //setTBRlocation(tbr_serial_number, latitude, longitude);
+                }
+                
+                
+
+                //if sensor message
+                  IMC::TBRSensor sensor_msg;
+                  sensor_msg.serial_no = tbr_serial_number;
+
+
+                  //dispatch(sensor_msg);
+
+                  //if tag detection
+              
+              /*
+                 //Transmit protocol
+        if(parts[3] == "R256")
+          trans_protocol = IMC::TBRFishTag::TBR_R256;
+        else if(parts[3] == "R04K")
+          trans_protocol = IMC::TBRFishTag::TBR_R04K;
+        else if(parts[3] == "S64K") {
+          trans_protocol = IMC::TBRFishTag::TBR_S64K;
+          if (readIntFromString(parts[5], trans_data))
+          {
+            // Tag raw data
+            spew(DTR("Tag raw data: %u"), trans_data);
+          }
+        }
+        else if(parts[3] == "R64K")
+          trans_protocol = IMC::TBRFishTag::TBR_R64K;
+        else if(parts[3] == "R01M")
+          trans_protocol = IMC::TBRFishTag::TBR_R01M;
+        else if(parts[3] == "S256") {
+          trans_protocol = IMC::TBRFishTag::TBR_S256;
+          if (readIntFromString(parts[5], trans_data))
+          {
+            // Tag raw data
+            spew(DTR("Tag raw data: %u"), trans_data);
+          }
+        }
+         else if(parts[3] == "HS256")
+          trans_protocol = IMC::TBRFishTag::TBR_HS256;
+        else if(parts[3] == "DS256")
+          trans_protocol = IMC::TBRFishTag::TBR_DS256;
+
+        IMC::TBRFishTag tag_msg;
+        tag_msg.serial_no = serial_no;
+        tag_msg.unix_timestamp = unix_timestamp;
+        tag_msg.millis = millis;
+        tag_msg.trans_protocol = trans_protocol;
+        tag_msg.trans_id = trans_id;
+        tag_msg.trans_data = trans_data;
+        tag_msg.snr = SNR;
+        tag_msg.trans_freq = trans_freq;
+        tag_msg.recv_mem_addr = recv_mem_addr;
+
+        unsigned buffer_index = findPosition(unix_timestamp, m_args.transmission_time);
+        tag_msg.lat = (*m_GPSBuffer)[buffer_index].lat;
+        tag_msg.lon = (*m_GPSBuffer)[buffer_index].lon;
+        dispatch(tag_msg);
+        */
+
+
+
+
+              }
+
+
+
+
+
+
+            }
+			    
+          }
+          }
+      };
+    }
+  }
+}
+
+DUNE_TASK
