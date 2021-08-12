@@ -77,5 +77,21 @@ Run cSLIM bridge simulator:
 sudo ./dune -c SLIM-message-bridge -p Simulation
 ```
 
+Test by publishing IoF messages to the topic.
+
+IoF buoy status message: 
+```
+09E160C72B14200506C3ACB80A0D0506
+```
+
+IoF TBR sensor message:  
+```
+09E060C72BFA00FF00120F2A23F8
+```
+
+IoF tag detection message: 
+```
+09E060C72B14240506C3AFB602
+```
 
 
