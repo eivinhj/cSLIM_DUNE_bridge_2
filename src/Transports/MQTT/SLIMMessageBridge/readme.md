@@ -58,13 +58,6 @@ sudo ldconfig
 
 ## Test that it works
 
-Start mosquitto MQTT broker:
-
-```
-mosquitto -v -p 2023
-```
-
-
 Navigate to dune/build folder.
 
 Build with 
