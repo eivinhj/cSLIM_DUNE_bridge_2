@@ -64,7 +64,7 @@ Build with
 ```
 make rebuild_cache && make
 ```
-Run cSLIM bridge simulator:
+Run IoF bridge simulator:
 
 ```
 sudo ./dune -c SLIM-message-bridge -p Simulation
